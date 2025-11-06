@@ -9,6 +9,7 @@ from tools import search_tool, wiki_tool, save_tool
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from pathlib import Path
+from typing import Any
 
 
 load_dotenv()  
@@ -80,8 +81,9 @@ app = FastAPI(title="AI Research Assistant Agent")
 async def get_agent_card():
     return JSONResponse(content=AGENT_CARD_DATA)
 
-@app.post("/")
-async def run_research(query: Query):
+
+
+async def execute_research_logic(query_text: str):
     try:
         raw_response = agent_executor.invoke({"query": query.query})
         output = raw_response.get("output")
@@ -93,7 +95,7 @@ async def run_research(query: Query):
 
         #  Check if the agent saved a file
         file_path = Path("research_output.txt")
-        if "save" in query.query.lower() and file_path.exists():
+        if "save" in query_text.lower() and file_path.exists():
             # Return the file directly
             return FileResponse(
                 path=file_path,
@@ -107,3 +109,61 @@ async def run_research(query: Query):
     except Exception as e:
         print("Error in /research:", e)
         raise HTTPException(status_code=500, detail=f"Error processing query: {e}")
+    
+
+@app.post("/")
+async def handle_a2a_message(message: dict[str, Any]):
+    """
+    The A2A standard entry point for receiving messages, wrapped in JSON-RPC 2.0.
+    """
+    request_id = message.get("id")
+    
+    try:
+        # 1. Extract the query from the likely JSON-RPC structure (Telex)
+        # We check for a common Telex structure: params -> input -> user_prompt
+        query_text = message.get("params", {}).get("input", {}).get("user_prompt")
+        
+        # Fallback to check for a simpler structure if the above fails
+        if not query_text:
+             query_text = message.get("query") or message.get("payload")
+
+        if not query_text:
+            # Return a standardized JSON-RPC error for a missing parameter
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "jsonrpc": "2.0",
+                    "error": {"code": -32602, "message": "Invalid params: Missing 'user_prompt' in message payload."},
+                    "id": request_id
+                }
+            )
+        
+        # 2. Execute the core research logic
+        # execute_research_logic handles the agent run and FileResponse logic internally
+        research_result = await execute_research_logic(query_text)
+        
+        # 3. Wrap the successful response in JSON-RPC 2.0 format
+        # If research_result is a FileResponse, you'll need to handle it differently, 
+        # but typically A2A agents return JSON. Assuming the core logic returns JSON:
+        return JSONResponse(content={
+            "jsonrpc": "2.0",
+            # The result field contains the output of the agent execution
+            "result": research_result, 
+            "id": request_id
+        })
+
+    except HTTPException as e:
+        # Re-raise explicit HTTP exceptions (e.g., from the core logic)
+        raise e
+        
+    except Exception as e:
+        print("Error during A2A message handling:", e)
+        # 4. Handle generic errors with a JSON-RPC error structure
+        return JSONResponse(
+            status_code=500,
+            content={
+                "jsonrpc": "2.0",
+                "error": {"code": -32603, "message": f"Internal server error: {e}"},
+                "id": request_id
+            }
+        )
