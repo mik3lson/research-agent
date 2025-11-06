@@ -7,12 +7,27 @@ from langchain_core.output_parsers import PydanticOutputParser
 from langchain.agents import create_tool_calling_agent, AgentExecutor
 from tools import search_tool, wiki_tool, save_tool
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pathlib import Path
 
 
 load_dotenv()  
 
+# --- A2A PROTOCOL: AGENT CARD DEFINITION ---
+AGENT_CARD_DATA = {
+    "name": "AI Research Assistant Agent",
+    "description": "An AI agent that performs research using search, Wikipedia, and can save results.",
+    "version": "1.0",
+    "service_url": "https://web-production-b95ea.up.railway.app/", 
+    "protocols": ["a2a-messaging-1.0"],
+    "interfaces": [
+        {"name": "research", "description": "Performs in-depth research on a given topic."},
+        
+    ],
+    "contact": "ndudimichael@gmail.com", 
+    "public_key": None 
+}
+# ---------------------------------------------
 
 class ResearchResponse(BaseModel):
     topic: str
@@ -61,7 +76,11 @@ agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
 
 app = FastAPI(title="AI Research Assistant Agent")
 
-@app.post("/research")
+@app.get("/.well-known/agent-card.json")
+async def get_agent_card():
+    return JSONResponse(content=AGENT_CARD_DATA)
+
+@app.post("/")
 async def run_research(query: Query):
     try:
         raw_response = agent_executor.invoke({"query": query.query})
@@ -72,10 +91,10 @@ async def run_research(query: Query):
         else:
             output_text = str(output)
 
-        # 🔍 Check if the agent saved a file
+        #  Check if the agent saved a file
         file_path = Path("research_output.txt")
         if "save" in query.query.lower() and file_path.exists():
-            # ✅ Return the file directly
+            # Return the file directly
             return FileResponse(
                 path=file_path,
                 filename="research_output.txt",
