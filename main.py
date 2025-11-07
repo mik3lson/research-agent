@@ -77,7 +77,7 @@ agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
 
 app = FastAPI(title="AI Research Assistant Agent")
 
-@app.get("/.well-known/agent-card.json")
+@app.get("/.well-known/agent.json")
 async def get_agent_card():
     return JSONResponse(content=AGENT_CARD_DATA)
 
