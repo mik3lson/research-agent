@@ -109,6 +109,7 @@ async def handle_rpc_request(request: Request):
   return result
 
 async def execute_research_logic(request: Request):
+    
     body = await request.json()
     params = body.get("params", {}) if isinstance(body, dict) else {}
 
@@ -130,7 +131,7 @@ async def execute_research_logic(request: Request):
         return JSONResponse(status_code=400, content={"error": "No query text found in request"})
 
     try:
-        raw_response = agent_executor.invoke({"query": query_text})
+        raw_response = agent_executor.ainvoke({"query": query_text})
 
         def _extract_text(resp: Any) -> str:
             if isinstance(resp, dict):
@@ -171,6 +172,7 @@ async def execute_research_logic(request: Request):
         rpc_id = body.get("id")
         rpc_response = {"jsonrpc": "2.0", "id": rpc_id, "result": result_payload}
         return JSONResponse(content=rpc_response)
-
+ 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing query: {e}")
+   
