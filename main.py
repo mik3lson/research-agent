@@ -6,7 +6,7 @@ from langchain_core.prompts.chat import ChatPromptTemplate
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain.agents import create_tool_calling_agent, AgentExecutor
 from tools import search_tool, wiki_tool, save_tool
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from pathlib import Path
 from typing import Any
@@ -82,88 +82,95 @@ async def get_agent_card():
     return JSONResponse(content=AGENT_CARD_DATA)
 
 
+@app.post("/")
+async def handle_rpc_request(request: Request):
+  body = await request.json()
 
-async def execute_research_logic(query_text: str):
+  method = body.get('method')
+
+  if method == "message/send":
+    #route to function handling that method
+    result = await execute_research_logic(request)
+
+
+  else: 
+    #throw return an error if method doesnt exist
+    error = {
+      "jsonrpc": "2.0", 
+      "id": body.get("id", None),
+      "error": {
+        "code": -32601, 
+        "message": "Method not found"
+      } 
+    }
+
+    return error
+
+  return result
+
+async def execute_research_logic(request: Request):
+    body = await request.json()
+    params = body.get("params", {}) if isinstance(body, dict) else {}
+
+    # Try several common locations for the query text (Telex A2A shapes + fallbacks)
+    query_text = None
+    msg = params.get("message") or params.get("msg") or {}
+    if isinstance(msg, dict):
+        content = msg.get("content") or {}
+        if isinstance(content, dict):
+            query_text = content.get("text") or content.get("body") or content.get("content")
+        if not query_text:
+            query_text = msg.get("text") or msg.get("body")
+    if not query_text:
+        query_text = params.get("query") or params.get("text")
+    if not query_text:
+        query_text = body.get("query") or body.get("text") or body.get("message")
+
+    if not query_text:
+        return JSONResponse(status_code=400, content={"error": "No query text found in request"})
+
     try:
-        raw_response = agent_executor.invoke({"query": query.query})
-        output = raw_response.get("output")
+        raw_response = agent_executor.invoke({"query": query_text})
 
-        if isinstance(output, str):
-            output_text = output
-        else:
-            output_text = str(output)
+        def _extract_text(resp: Any) -> str:
+            if isinstance(resp, dict):
+                out = resp.get("output")
+                if isinstance(out, list) and out:
+                    first = out[0]
+                    if isinstance(first, dict):
+                        return first.get("text") or first.get("output_text") or str(first)
+                    return str(first)
+                return resp.get("output_text") or resp.get("text") or str(resp)
+            if hasattr(resp, "output"):
+                try:
+                    o = resp.output
+                    if isinstance(o, list) and o:
+                        first = o[0]
+                        if isinstance(first, dict):
+                            return first.get("text") or first.get("output_text") or str(first)
+                        return str(first)
+                except Exception:
+                    pass
+            return str(resp)
 
-        #  Check if the agent saved a file
+        output_text = _extract_text(raw_response)
+
+        # Try structured parse, fall back to raw text
+        try:
+            structured = parser.parse(output_text)
+            result_payload = {"structured": structured.dict()}
+        except Exception:
+            result_payload = {"text": output_text}
+
+        # If user asked to save and file was produced, return file
         file_path = Path("research_output.txt")
         if "save" in query_text.lower() and file_path.exists():
-            # Return the file directly
-            return FileResponse(
-                path=file_path,
-                filename="research_output.txt",
-                media_type="text/plain"
-            )
+            return FileResponse(path=str(file_path), filename="research_output.txt", media_type="text/plain")
 
-        # Otherwise, return text
-        return {"response": output_text}
+        # Return JSON-RPC style response if request used that format
+        rpc_id = body.get("id")
+        rpc_response = {"jsonrpc": "2.0", "id": rpc_id, "result": result_payload}
+        return JSONResponse(content=rpc_response)
 
     except Exception as e:
-        print("Error in /research:", e)
         raise HTTPException(status_code=500, detail=f"Error processing query: {e}")
-    
-
-@app.post("/")
-async def handle_a2a_message(message: dict[str, Any]):
-    """
-    The A2A standard entry point for receiving messages, wrapped in JSON-RPC 2.0.
-    """
-    request_id = message.get("id")
-    
-    try:
-        # 1. Extract the query from the likely JSON-RPC structure (Telex)
-        # We check for a common Telex structure: params -> input -> user_prompt
-        query_text = message.get("params", {}).get("input", {}).get("user_prompt")
-        
-        # Fallback to check for a simpler structure if the above fails
-        if not query_text:
-             query_text = message.get("query") or message.get("payload")
-
-        if not query_text:
-            # Return a standardized JSON-RPC error for a missing parameter
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "jsonrpc": "2.0",
-                    "error": {"code": -32602, "message": "Invalid params: Missing 'user_prompt' in message payload."},
-                    "id": request_id
-                }
-            )
-        
-        # 2. Execute the core research logic
-        # execute_research_logic handles the agent run and FileResponse logic internally
-        research_result = await execute_research_logic(query_text)
-        
-        # 3. Wrap the successful response in JSON-RPC 2.0 format
-        # If research_result is a FileResponse, you'll need to handle it differently, 
-        # but typically A2A agents return JSON. Assuming the core logic returns JSON:
-        return JSONResponse(content={
-            "jsonrpc": "2.0",
-            # The result field contains the output of the agent execution
-            "result": research_result, 
-            "id": request_id
-        })
-
-    except HTTPException as e:
-        # Re-raise explicit HTTP exceptions (e.g., from the core logic)
-        raise e
-        
-    except Exception as e:
-        print("Error during A2A message handling:", e)
-        # 4. Handle generic errors with a JSON-RPC error structure
-        return JSONResponse(
-            status_code=500,
-            content={
-                "jsonrpc": "2.0",
-                "error": {"code": -32603, "message": f"Internal server error: {e}"},
-                "id": request_id
-            }
-        )
