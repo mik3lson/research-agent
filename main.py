@@ -56,7 +56,6 @@ prompt = ChatPromptTemplate.from_messages(
             Wrap the output in this format and provide no other text\n{format_instuctions}
             """
         ),
-        ("placeholder", "{chat_history}"),
         ("human", "{query}"),
         ("placeholder", "{agent_scratchpad}"),
     ]
