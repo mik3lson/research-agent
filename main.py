@@ -63,7 +63,8 @@ prompt = ChatPromptTemplate.from_messages(
 ).partial(format_instuctions=parser.get_format_instructions())
 
 
-tools = [search_tool, wiki_tool, save_tool]
+#tools = [search_tool, wiki_tool, save_tool]
+tools =[]
 agent = create_tool_calling_agent(
     llm=llm,
     prompt=prompt,
