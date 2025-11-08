@@ -57,7 +57,7 @@ prompt = ChatPromptTemplate.from_messages(
             """
         ),
         ("human", "{query}"),
-        ("placeholder", "{agent_scratchpad}"),
+        ("placeholder", "{chat_history}"),
     ]
 ).partial(format_instuctions=parser.get_format_instructions())
 
