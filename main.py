@@ -56,14 +56,15 @@ prompt = ChatPromptTemplate.from_messages(
             Wrap the output in this format and provide no other text\n{format_instuctions}
             """
         ),
+
         ("human", "{query}"),
-        ("placeholder", "{chat_history}"),
+        ("placeholder", "{agent_scratchpad}"),
     ]
 ).partial(format_instuctions=parser.get_format_instructions())
 
 
-#tools = [search_tool, wiki_tool, save_tool]
-tools =[]
+tools = [search_tool, wiki_tool, save_tool]
+#tools =[]
 agent = create_tool_calling_agent(
     llm=llm,
     prompt=prompt,
