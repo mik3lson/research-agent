@@ -18,7 +18,7 @@ import asyncio
 
 load_dotenv() 
 
-# --- 1. A2A PROTOCOL: PYDANTIC MODELS (Required for TaskResult structure) ---
+
 
 class MessagePart(BaseModel):
     kind: Literal["text", "data", "file"]
@@ -127,16 +127,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# FIX: Corrected Agent Card path
 @app.get("/.well-known/agent-card.json")
 async def get_agent_card():
     return JSONResponse(content=AGENT_CARD_DATA)
 
-# --- 4. CORE A2A ENDPOINT (Adapted to TaskResult structure) ---
 
 @app.post("/")
-# NOTE: The working agent used a specific path like "/a2a/nasa". 
-# If this fails, change the decorator to @app.post("/a2a/research") and update your Telex URL.
 async def handle_rpc_request(request: Request):
     try:
         body = await request.json()
@@ -144,16 +140,16 @@ async def handle_rpc_request(request: Request):
         method = body.get('method')
         
         if method == "message/send":
-            # 1. Extract the query using the robust logic
+            #Extract the query using the robust logic
             query_text = extract_user_message_from_request(body)
             
-            # 2. Execute the LangChain agent logic
+            #Execute the LangChain agent logic
             agent_result_payload = await execute_research_logic(query_text)
             
-            # 3. Format the result into the complex TaskResult structure
+            #Format the result into the complex TaskResult structure
             task_result = await create_task_result(agent_result_payload, request_id, body)
             
-            # 4. Final JSON-RPC response
+            #Final JSON-RPC response
             rpc_response = JSONRPCResponse(id=request_id, result=task_result)
             return rpc_response.model_dump(by_alias=True)
 
@@ -179,7 +175,7 @@ async def handle_rpc_request(request: Request):
         return JSONResponse(status_code=500, content=error_response)
 
 
-# --- 5. HELPER FUNCTIONS ---
+# HELPER FUNCTIONS 
 
 def extract_user_message_from_request(body: dict) -> str:
     """Extract user message from the deeply nested A2A request body, adapting from the working agent's logic."""
@@ -268,7 +264,7 @@ async def create_task_result(agent_payload: dict, request_id: str, original_body
         )
     ]
     
-    # 4. Build TaskResult (simplified history for now)
+    # simplified history
     history = [response_message]
     
     result = TaskResult(
@@ -285,8 +281,3 @@ async def create_task_result(agent_payload: dict, request_id: str, original_body
     )
     return result
 
-if __name__ == "__main__":
-    import uvicorn
-    port = int(os.getenv("PORT", 8000))
-    # Note: For Railway, this run block might not be used if it uses a Procfile/ASGI server config
-    uvicorn.run(app, host="0.0.0.0", port=port)
